@@ -2,15 +2,20 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-// Token de verificación (seguro y único)
-//const VERIFY_TOKEN = "whatsapp_bot_" + require('crypto').randomBytes(8).toString('hex');
-const VERIFY_TOKEN = "whatsapp_bot_token_fijo_123";
+// Token de verificación (preferir variable de entorno en producción)
+// You can set VERIFY_TOKEN in environment (recommended). If not set, a fixed token is used for local/dev convenience.
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "whatsapp_bot_token_fijo_123";
+const _isDefaultVerifyToken = VERIFY_TOKEN === "whatsapp_bot_token_fijo_123";
 
 
 console.log('🔧 ===== WHATSAPP BOT INSTALADO =====');
-console.log('🔑 Token de verificación:', VERIFY_TOKEN);
+if (_isDefaultVerifyToken) {
+  console.log('⚠️  WARNING: Using default built-in verification token. Set VERIFY_TOKEN env var for production.');
+} else {
+  console.log('🔑 Token de verificación: [PROVIDED]');
+}
 //console.log('🌐 Webhook URL: http://' + require('os').hostname() + ':3001/webhook');
-console.log('🌐 Webhook URL: http://138.68.47.117:3001/webhook');
+console.log('🌐 Webhook endpoint: /webhook (port ' + (process.env.PORT || 3001) + ')');
 
 console.log('💻 RAM: OPTIMIZADA para 512MB');
 console.log('=====================================');
@@ -49,8 +54,13 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = 3001;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 WhatsApp Bot ejecutándose en puerto ${PORT}`);
-  console.log(`🛡️  Health check: http://localhost:${PORT}/health`);
-});
+// Export app for testing. When run directly, start the server.
+const PORT = process.env.PORT || 3001;
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 WhatsApp Bot ejecutándose en puerto ${PORT}`);
+    console.log(`🛡️  Health check: http://localhost:${PORT}/health`);
+  });
+}
+
+module.exports = app;
