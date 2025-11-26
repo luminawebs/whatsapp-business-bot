@@ -292,7 +292,7 @@ if (require.main === module) {
     console.log(`🛡️  Health check: http://localhost:${PORT}/health`);
     
     // NEW: Initialize data on startup
-    await initializeDefaultData();
+    // await initializeDefaultData();
   });
 }
 
