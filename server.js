@@ -142,6 +142,81 @@ app.post('/api/admin/login', async (req, res) => {
 });
 
 
+// ===== TEMPORARY: TEST ENDPOINTS (bypass permissions) =====
+
+// Test tenant setup
+app.post('/api/test/setup', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not available' });
+  
+  try {
+    // Check if we have any tenants
+    const tenantResult = await pool.query('SELECT id, name FROM tenants LIMIT 1');
+    
+    if (tenantResult.rows.length > 0) {
+      return res.json({ 
+        message: 'Tenant already exists',
+        tenant: tenantResult.rows[0]
+      });
+    }
+    
+    // Try to create a tenant
+    const newTenant = await pool.query(
+      'INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING *',
+      ['Test Business', 'admin@example.com']
+    );
+    
+    res.json({ 
+      message: 'Test tenant created',
+      tenant: newTenant.rows[0]
+    });
+    
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Cannot create tenant',
+      details: error.message,
+      workaround: 'Use this test tenant ID for development: test-tenant-123'
+    });
+  }
+});
+
+// Test course creation with hardcoded tenant ID
+app.post('/api/test/courses', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not available' });
+  
+  try {
+    const { title, description, passing_score } = req.body;
+    
+    // Use a hardcoded tenant ID for testing
+    const tenantId = 'test-tenant-123';
+    
+    const result = await pool.query(
+      `INSERT INTO courses (tenant_id, title, description, passing_score) 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [tenantId, title, description, passing_score || 70]
+    );
+    
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Test course creation error:', error);
+    res.status(500).json({ error: 'Failed to create test course', details: error.message });
+  }
+});
+
+// Test: Get all courses (no tenant filter)
+app.get('/api/test/courses', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not available' });
+  
+  try {
+    const result = await pool.query('SELECT * FROM courses ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get test courses error:', error);
+    res.status(500).json({ error: 'Failed to fetch courses', details: error.message });
+  }
+});
+
+
+
 // ===== WEEK 2: COURSE MANAGEMENT API =====
 
 // Get all courses for a tenant
