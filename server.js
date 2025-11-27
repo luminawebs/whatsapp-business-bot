@@ -204,6 +204,29 @@ app.post('/api/test/courses', async (req, res) => {
   }
 });
 
+// Add this test endpoint to your server.js (after the other test endpoints)
+app.post('/api/test/simple', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not available' });
+  
+  try {
+    // Just test a simple SELECT query
+    const testResult = await pool.query('SELECT COUNT(*) as count FROM courses');
+    
+    res.json({ 
+      message: 'Database query successful',
+      courseCount: parseInt(testResult.rows[0].count),
+      canRead: true
+    });
+    
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Database query failed',
+      details: error.message,
+      canRead: false
+    });
+  }
+});
+
 // Test: Get all courses (no tenant filter)
 app.get('/api/test/courses', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not available' });
