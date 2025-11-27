@@ -144,6 +144,8 @@ app.post('/api/admin/login', async (req, res) => {
 
 // ===== TEMPORARY: TEST ENDPOINTS (bypass permissions) =====
 
+
+
 // Test tenant setup
 app.post('/api/test/setup', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not available' });
@@ -159,7 +161,7 @@ app.post('/api/test/setup', async (req, res) => {
       });
     }
     
-    // Try to create a tenant
+    // Try to create a tenant with proper UUID generation
     const newTenant = await pool.query(
       'INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING *',
       ['Test Business', 'admin@example.com']
@@ -174,20 +176,20 @@ app.post('/api/test/setup', async (req, res) => {
     res.status(500).json({ 
       error: 'Cannot create tenant',
       details: error.message,
-      workaround: 'Use this test tenant ID for development: test-tenant-123'
+      workaround: 'Database permissions issue - using fallback'
     });
   }
 });
 
-// Test course creation with hardcoded tenant ID
+// Test course creation with UUID-compatible tenant ID
 app.post('/api/test/courses', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not available' });
   
   try {
     const { title, description, passing_score } = req.body;
     
-    // Use a hardcoded tenant ID for testing
-    const tenantId = 'test-tenant-123';
+    // Use a UUID-compatible test ID
+    const tenantId = '12345678-1234-1234-1234-123456789012';
     
     const result = await pool.query(
       `INSERT INTO courses (tenant_id, title, description, passing_score) 
@@ -214,7 +216,6 @@ app.get('/api/test/courses', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch courses', details: error.message });
   }
 });
-
 
 
 // ===== WEEK 2: COURSE MANAGEMENT API =====
