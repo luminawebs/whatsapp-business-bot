@@ -9,7 +9,7 @@ router.get('/tenants/:tenantId/active-users', async (req, res) => {
     
     const activeUsers = await db.any(`
       SELECT 
-        p.phone_number,
+        p.phone_e164 as phone_number,
         p.name,
         c.title as course_title,
         e.status,
