@@ -1,9 +1,17 @@
 const express = require('express');
-const { Pool } = require('pg');
+const db = require('./config/database'); // Use the centralized database config
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const app = express();
 app.use(express.json());
+
+// Import the new routes
+const enrollmentRoutes = require('./routes/enrollments');
+const dashboardRoutes = require('./routes/dashboard');
+
+// Register routes
+app.use('/api', enrollmentRoutes);
+app.use('/api', dashboardRoutes);
 
 // ===== YOUR EXISTING CONFIG (KEEP THIS) =====
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "whatsapp_bot_token_fijo_123";
@@ -19,20 +27,143 @@ console.log('🌐 Webhook endpoint: /webhook (port ' + (process.env.PORT || 3001
 console.log('💻 RAM: OPTIMIZADA para 512MB');
 console.log('=====================================');
 
-// ===== NEW: DATABASE CONNECTION =====
-let pool;
-try {
-  pool = new Pool({
-    user: process.env.DB_USER || 'bot_user',
-    host: process.env.DB_HOST || 'localhost',
-    database: process.env.DB_NAME || 'whatsapp_learning',
-    password: process.env.DB_PASSWORD || 's3cure_eduwpp%%21@u',
-    port: process.env.DB_PORT || 5432,
-  });
-  console.log('✅ PostgreSQL connection configured');
-} catch (error) {
-  console.log('⚠️  Database connection failed, running in fallback mode');
-  console.log('💡 Run: npm install pg bcryptjs jsonwebtoken');
+// ===== WHATSAPP MESSAGE SENDER =====
+async function sendWhatsAppMessage(phoneNumber, message) {
+  try {
+    // Remove any formatting and keep only digits
+    const formattedPhone = phoneNumber.replace(/\D/g, '');
+    
+    // For now, just log since we don't have WhatsApp API credentials set up
+    console.log(`📤 [WHATSAPP SIMULATION] To: ${formattedPhone}`);
+    console.log(`📤 Message: ${message}`);
+    console.log('---');
+    
+    // In production, you would uncomment this:
+    /*
+    const response = await axios.post(
+      `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to: formattedPhone,
+        type: "text",
+        text: { body: message }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    */
+    
+    return { success: true, simulated: true };
+  } catch (error) {
+    console.error('WhatsApp API error:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// ===== NEW: NEXT COMMAND HANDLER =====
+async function handleNextCommand(phoneNumber) {
+  try {
+    console.log(`🔄 Processing "next" command from ${phoneNumber}`);
+    
+    // Find participant's active enrollment
+    const enrollment = await db.oneOrNone(`
+      SELECT e.*, p.tenant_id 
+      FROM enrollments e
+      JOIN participants p ON e.participant_id = p.id
+      WHERE p.phone_number = $1 AND e.status = 'active'
+      LIMIT 1
+    `, [phoneNumber]);
+
+    if (!enrollment) {
+      await sendWhatsAppMessage(phoneNumber, "You don't have an active course. Contact admin.");
+      return;
+    }
+
+    // Get current progress from delivery_log
+    const currentProgress = await db.oneOrNone(`
+      SELECT MAX(item_index) as current_index 
+      FROM delivery_log 
+      WHERE enrollment_id = $1 AND user_responded_at IS NOT NULL
+    `, [enrollment.id]);
+
+    const nextItemIndex = (currentProgress?.current_index || -1) + 1;
+
+    // Get next item
+    const nextItem = await db.oneOrNone(`
+      SELECT * FROM course_items 
+      WHERE course_id = $1 
+      ORDER BY item_order ASC 
+      LIMIT 1 OFFSET $2
+    `, [enrollment.course_id, nextItemIndex]);
+
+    if (nextItem) {
+      // Send next item
+      await sendWhatsAppMessage(phoneNumber, formatCourseItem(nextItem));
+      
+      // Log delivery (mark previous response and new delivery)
+      if (nextItemIndex > 0) {
+        await db.none(
+          `UPDATE delivery_log 
+           SET user_responded_at = NOW() 
+           WHERE enrollment_id = $1 AND item_index = $2`,
+          [enrollment.id, nextItemIndex - 1]
+        );
+      }
+
+      await db.none(
+        `INSERT INTO delivery_log (enrollment_id, item_index, delivered_at) 
+         VALUES ($1, $2, NOW())`,
+        [enrollment.id, nextItemIndex]
+      );
+
+      console.log(`📚 Sent item ${nextItemIndex} to ${phoneNumber}`);
+
+    } else {
+      // Course completed!
+      await sendWhatsAppMessage(phoneNumber, "🎉 Congratulations! You've completed the course!");
+      
+      await db.none(
+        `UPDATE enrollments 
+         SET status = 'completed', completed_at = NOW() 
+         WHERE id = $1`,
+        [enrollment.id]
+      );
+
+      // Mark final response
+      await db.none(
+        `UPDATE delivery_log 
+         SET user_responded_at = NOW() 
+         WHERE enrollment_id = $1 AND item_index = $2`,
+        [enrollment.id, nextItemIndex - 1]
+      );
+
+      console.log(`✅ Course completed by ${phoneNumber}`);
+    }
+
+  } catch (error) {
+    console.error('Next command error:', error);
+    await sendWhatsAppMessage(phoneNumber, "Sorry, there was an error. Please try again.");
+  }
+}
+
+// Helper function to format course items
+function formatCourseItem(item) {
+  switch (item.type) {
+    case 'text':
+      return item.content;
+    case 'image':
+      return `${item.content}\n\n[Image]`;
+    case 'audio':
+      return `${item.content}\n\n[Audio]`;
+    case 'video':
+      return `${item.content}\n\n[Video]`;
+    default:
+      return item.content;
+  }
 }
 
 // ===== YOUR EXISTING WEBHOOK (KEEP THIS) =====
@@ -52,29 +183,34 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// ===== ENHANCED WEBHOOK (STORES MESSAGES IN DB) =====
+// ===== ENHANCED WEBHOOK (PROCESSES NEXT COMMANDS) =====
 app.post('/webhook', async (req, res) => {
   console.log('📨 Mensaje recibido de WhatsApp');
-  console.log(JSON.stringify(req.body, null, 2));
   
-  // NEW: Store message in database if available
-  if (pool) {
+  // NEW: Process messages for "next" command
+  if (req.body.entry && req.body.entry[0].changes && req.body.entry[0].changes[0].value.messages) {
+    const message = req.body.entry[0].changes[0].value.messages[0];
+    const from = message.from;
+    const text = message.text?.body || '';
+
+    console.log(`💬 Message from ${from}: "${text}"`);
+
+    // Process "next" command
+    if (text && text.toLowerCase().trim() === 'next') {
+      await handleNextCommand(from);
+    }
+
+    // NEW: Store message in database if available
     try {
-      const body = req.body;
-      if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
-        const message = body.entry[0].changes[0].value.messages[0];
-        const from = message.from;
-        
-        await pool.query(
-          `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
-           VALUES ($1, $2, $3, $4)`,
-          ['default-tenant', message.id, 'in', body]
-        );
-        
-        console.log(`💾 Mensaje guardado en base de datos de: ${from}`);
-      }
+      await db.query(
+        `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
+         VALUES ($1, $2, $3, $4)`,
+        ['default-tenant', message.id, 'in', req.body]
+      );
+      
+      console.log(`💾 Mensaje guardado en base de datos de: ${from}`);
     } catch (dbError) {
-      console.log('⚠️  No se pudo guardar en BD, pero el webhook funciona:', dbError.message);
+      console.log('⚠️  No se pudo guardar en BD:', dbError.message);
     }
   }
   
@@ -91,16 +227,12 @@ app.get('/health', async (req, res) => {
   };
   
   // NEW: Add database status
-  if (pool) {
-    try {
-      await pool.query('SELECT 1');
-      health.database = 'connected';
-    } catch (error) {
-      health.database = 'disconnected';
-      health.db_error = error.message;
-    }
-  } else {
-    health.database = 'not_configured';
+  try {
+    await db.query('SELECT 1');
+    health.database = 'connected';
+  } catch (error) {
+    health.database = 'disconnected';
+    health.db_error = error.message;
   }
   
   res.json(health);
@@ -108,10 +240,6 @@ app.get('/health', async (req, res) => {
 
 // ===== NEW: ADMIN AUTH ENDPOINTS =====
 app.post('/api/admin/login', async (req, res) => {
-  if (!pool) {
-    return res.status(503).json({ error: 'Database not available' });
-  }
-  
   try {
     const { email, password } = req.body;
     
@@ -141,18 +269,13 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-
 // ===== TEMPORARY: TEST ENDPOINTS (bypass permissions) =====
-
-
 
 // Test tenant setup
 app.post('/api/test/setup', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     // Check if we have any tenants
-    const tenantResult = await pool.query('SELECT id, name FROM tenants LIMIT 1');
+    const tenantResult = await db.query('SELECT id, name FROM tenants LIMIT 1');
     
     if (tenantResult.rows.length > 0) {
       return res.json({ 
@@ -162,7 +285,7 @@ app.post('/api/test/setup', async (req, res) => {
     }
     
     // Try to create a tenant with proper UUID generation
-    const newTenant = await pool.query(
+    const newTenant = await db.query(
       'INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING *',
       ['Test Business', 'admin@example.com']
     );
@@ -183,15 +306,13 @@ app.post('/api/test/setup', async (req, res) => {
 
 // Test course creation with UUID-compatible tenant ID
 app.post('/api/test/courses', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     const { title, description, passing_score } = req.body;
     
     // Use a UUID-compatible test ID
     const tenantId = '12345678-1234-1234-1234-123456789012';
     
-    const result = await pool.query(
+    const result = await db.query(
       `INSERT INTO courses (tenant_id, title, description, passing_score) 
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [tenantId, title, description, passing_score || 70]
@@ -206,11 +327,9 @@ app.post('/api/test/courses', async (req, res) => {
 
 // Add this test endpoint to your server.js (after the other test endpoints)
 app.post('/api/test/simple', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     // Just test a simple SELECT query
-    const testResult = await pool.query('SELECT COUNT(*) as count FROM courses');
+    const testResult = await db.query('SELECT COUNT(*) as count FROM courses');
     
     res.json({ 
       message: 'Database query successful',
@@ -229,10 +348,8 @@ app.post('/api/test/simple', async (req, res) => {
 
 // Test: Get all courses (no tenant filter)
 app.get('/api/test/courses', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
-    const result = await pool.query('SELECT * FROM courses ORDER BY created_at DESC');
+    const result = await db.query('SELECT * FROM courses ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Get test courses error:', error);
@@ -240,16 +357,13 @@ app.get('/api/test/courses', async (req, res) => {
   }
 });
 
-
 // ===== WEEK 2: COURSE MANAGEMENT API =====
 
 // Get all courses for a tenant
 app.get('/api/tenant/:tenantId/courses', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     const { tenantId } = req.params;
-    const result = await pool.query(
+    const result = await db.query(
       'SELECT * FROM courses WHERE tenant_id = $1 ORDER BY created_at DESC',
       [tenantId]
     );
@@ -262,13 +376,11 @@ app.get('/api/tenant/:tenantId/courses', async (req, res) => {
 
 // Create a new course
 app.post('/api/tenant/:tenantId/courses', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     const { tenantId } = req.params;
     const { title, description, passing_score } = req.body;
     
-    const result = await pool.query(
+    const result = await db.query(
       `INSERT INTO courses (tenant_id, title, description, passing_score) 
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [tenantId, title, description, passing_score || 70]
@@ -283,14 +395,12 @@ app.post('/api/tenant/:tenantId/courses', async (req, res) => {
 
 // Add content item to course
 app.post('/api/courses/:courseId/items', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     const { courseId } = req.params;
     const { type, title, content_url, metadata, required, idx } = req.body;
     
     // Get tenant_id from course for security
-    const courseCheck = await pool.query(
+    const courseCheck = await db.query(
       'SELECT tenant_id FROM courses WHERE id = $1',
       [courseId]
     );
@@ -301,7 +411,7 @@ app.post('/api/courses/:courseId/items', async (req, res) => {
     
     const tenantId = courseCheck.rows[0].tenant_id;
     
-    const result = await pool.query(
+    const result = await db.query(
       `INSERT INTO course_items (course_id, tenant_id, idx, type, title, content_url, metadata, required) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
       [courseId, tenantId, idx, type, title, content_url, metadata, required !== false]
@@ -316,12 +426,10 @@ app.post('/api/courses/:courseId/items', async (req, res) => {
 
 // Get course with items
 app.get('/api/courses/:courseId', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'Database not available' });
-  
   try {
     const { courseId } = req.params;
     
-    const courseResult = await pool.query(
+    const courseResult = await db.query(
       'SELECT * FROM courses WHERE id = $1',
       [courseId]
     );
@@ -330,7 +438,7 @@ app.get('/api/courses/:courseId', async (req, res) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const itemsResult = await pool.query(
+    const itemsResult = await db.query(
       'SELECT * FROM course_items WHERE course_id = $1 ORDER BY idx',
       [courseId]
     );
@@ -345,53 +453,12 @@ app.get('/api/courses/:courseId', async (req, res) => {
   }
 });
 
-
-// ===== INITIALIZE DEFAULT DATA =====
-async function initializeDefaultData() {
-  if (!pool) return;
-  
-  try {
-    // Check if we have any tenants
-    const tenantResult = await pool.query('SELECT * FROM tenants LIMIT 1');
-    
-    if (tenantResult.rows.length === 0) {
-      console.log('🔧 Initializing default tenant and admin...');
-      
-      // Create default tenant
-      const newTenant = await pool.query(
-        'INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING *',
-        ['Default Tenant', 'admin@example.com']
-      );
-      
-      const tenantId = newTenant.rows[0].id;
-      
-      // Create default admin user (with proper password hash)
-      const passwordHash = await bcrypt.hash('admin123', 10);
-      await pool.query(
-        'INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)',
-        [tenantId, 'admin@example.com', passwordHash, 'admin']
-      );
-      
-      console.log('✅ Default tenant and admin user created');
-      console.log(`📧 Admin login: admin@example.com / admin123`);
-      console.log(`🔑 Tenant ID: ${tenantId}`);
-    } else {
-      console.log('✅ Default data already initialized');
-    }
-  } catch (error) {
-    console.log('⚠️ Could not initialize default data:', error.message);
-  }
-}
-
 // ===== YOUR EXISTING SERVER STARTUP =====
 const PORT = process.env.PORT || 3001;
 if (require.main === module) {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`🚀 WhatsApp Bot ejecutándose en puerto ${PORT}`);
     console.log(`🛡️  Health check: http://localhost:${PORT}/health`);
-    
-    // NEW: Initialize data on startup
-    // await initializeDefaultData();
   });
 }
 
