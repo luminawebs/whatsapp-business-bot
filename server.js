@@ -28,13 +28,13 @@ console.log('🌐 Webhook endpoint: /webhook (port ' + (process.env.PORT || 3001
 console.log('💻 RAM: OPTIMIZADA para 512MB');
 console.log('=====================================');
 
- 
+
 
 // ===== NEW: NEXT COMMAND HANDLER =====
 async function handleNextCommand(phoneNumber) {
   try {
     console.log(`🔄 Processing "next" command from ${phoneNumber}`);
-    
+
     // Find participant's active enrollment
     const enrollment = await db.oneOrNone(`
       SELECT e.*, p.tenant_id 
@@ -69,7 +69,7 @@ async function handleNextCommand(phoneNumber) {
     if (nextItem) {
       // Send next item
       await sendWhatsAppMessage(phoneNumber, formatCourseItem(nextItem));
-      
+
       // Log delivery (mark previous response and new delivery)
       if (nextItemIndex > 0) {
         await db.none(
@@ -91,7 +91,7 @@ async function handleNextCommand(phoneNumber) {
     } else {
       // Course completed!
       await sendWhatsAppMessage(phoneNumber, "🎉 Congratulations! You've completed the course!");
-      
+
       await db.none(
         `UPDATE enrollments 
          SET status = 'completed', completed_at = NOW() 
@@ -152,7 +152,7 @@ app.get('/webhook', (req, res) => {
 // ===== ENHANCED WEBHOOK (PROCESSES NEXT COMMANDS) =====
 app.post('/webhook', async (req, res) => {
   console.log('📨 Mensaje recibido de WhatsApp');
-  
+
   // NEW: Process messages for "next" command
   if (req.body.entry && req.body.entry[0].changes && req.body.entry[0].changes[0].value.messages) {
     const message = req.body.entry[0].changes[0].value.messages[0];
@@ -170,28 +170,28 @@ app.post('/webhook', async (req, res) => {
     try {
       await db.query(
         `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
-         VALUES ($1, $2, $3, $4)`,
-        ['default-tenant', message.id, 'in', req.body]
+   VALUES ($1, $2, $3, $4)`,
+        ['d951955c-4994-4d74-96a5-6709aa4f5405', message.id, 'in', req.body]  // ← Use real tenant ID
       );
-      
+
       console.log(`💾 Mensaje guardado en base de datos de: ${from}`);
     } catch (dbError) {
       console.log('⚠️  No se pudo guardar en BD:', dbError.message);
     }
   }
-  
+
   res.sendStatus(200);
 });
 
 // ===== YOUR EXISTING HEALTH CHECK (ENHANCED) =====
 app.get('/health', async (req, res) => {
-  const health = { 
-    status: 'ok', 
+  const health = {
+    status: 'ok',
     memory: process.memoryUsage(),
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
   };
-  
+
   // NEW: Add database status
   try {
     await db.query('SELECT 1');
@@ -200,7 +200,7 @@ app.get('/health', async (req, res) => {
     health.database = 'disconnected';
     health.db_error = error.message;
   }
-  
+
   res.json(health);
 });
 
@@ -208,27 +208,27 @@ app.get('/health', async (req, res) => {
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
+
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
-    
+
     // For now, simple auth - we'll enhance this later
     if (email === 'admin@example.com' && password === 'admin123') {
       const token = jwt.sign(
-        { email: 'admin@example.com' }, 
+        { email: 'admin@example.com' },
         process.env.JWT_SECRET || 'default_jwt_secret',
         { expiresIn: '24h' }
       );
-      
-      res.json({ 
-        token, 
-        user: { email: 'admin@example.com', role: 'admin' } 
+
+      res.json({
+        token,
+        user: { email: 'admin@example.com', role: 'admin' }
       });
     } else {
       res.status(401).json({ error: 'Invalid credentials' });
     }
-    
+
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -242,27 +242,27 @@ app.post('/api/test/setup', async (req, res) => {
   try {
     // Check if we have any tenants
     const tenantResult = await db.query('SELECT id, name FROM tenants LIMIT 1');
-    
+
     if (tenantResult.rows.length > 0) {
-      return res.json({ 
+      return res.json({
         message: 'Tenant already exists',
         tenant: tenantResult.rows[0]
       });
     }
-    
+
     // Try to create a tenant with proper UUID generation
     const newTenant = await db.query(
       'INSERT INTO tenants (name, contact_email) VALUES ($1, $2) RETURNING *',
       ['Test Business', 'admin@example.com']
     );
-    
-    res.json({ 
+
+    res.json({
       message: 'Test tenant created',
       tenant: newTenant.rows[0]
     });
-    
+
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Cannot create tenant',
       details: error.message,
       workaround: 'Database permissions issue - using fallback'
@@ -274,16 +274,16 @@ app.post('/api/test/setup', async (req, res) => {
 app.post('/api/test/courses', async (req, res) => {
   try {
     const { title, description, passing_score } = req.body;
-    
+
     // Use a UUID-compatible test ID
     const tenantId = '12345678-1234-1234-1234-123456789012';
-    
+
     const result = await db.query(
       `INSERT INTO courses (tenant_id, title, description, passing_score) 
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [tenantId, title, description, passing_score || 70]
     );
-    
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Test course creation error:', error);
@@ -296,15 +296,15 @@ app.post('/api/test/simple', async (req, res) => {
   try {
     // Just test a simple SELECT query
     const testResult = await db.query('SELECT COUNT(*) as count FROM courses');
-    
-    res.json({ 
+
+    res.json({
       message: 'Database query successful',
       courseCount: parseInt(testResult.rows[0].count),
       canRead: true
     });
-    
+
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Database query failed',
       details: error.message,
       canRead: false
@@ -345,13 +345,13 @@ app.post('/api/tenant/:tenantId/courses', async (req, res) => {
   try {
     const { tenantId } = req.params;
     const { title, description, passing_score } = req.body;
-    
+
     const result = await db.query(
       `INSERT INTO courses (tenant_id, title, description, passing_score) 
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [tenantId, title, description, passing_score || 70]
     );
-    
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Create course error:', error);
@@ -364,25 +364,25 @@ app.post('/api/courses/:courseId/items', async (req, res) => {
   try {
     const { courseId } = req.params;
     const { type, title, content_url, metadata, required, idx } = req.body;
-    
+
     // Get tenant_id from course for security
     const courseCheck = await db.query(
       'SELECT tenant_id FROM courses WHERE id = $1',
       [courseId]
     );
-    
+
     if (courseCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    
+
     const tenantId = courseCheck.rows[0].tenant_id;
-    
+
     const result = await db.query(
       `INSERT INTO course_items (course_id, tenant_id, idx, type, title, content_url, metadata, required) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
       [courseId, tenantId, idx, type, title, content_url, metadata, required !== false]
     );
-    
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Add course item error:', error);
@@ -394,21 +394,21 @@ app.post('/api/courses/:courseId/items', async (req, res) => {
 app.get('/api/courses/:courseId', async (req, res) => {
   try {
     const { courseId } = req.params;
-    
+
     const courseResult = await db.query(
       'SELECT * FROM courses WHERE id = $1',
       [courseId]
     );
-    
+
     if (courseResult.rows.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
     }
-    
+
     const itemsResult = await db.query(
       'SELECT * FROM course_items WHERE course_id = $1 ORDER BY idx',
       [courseId]
     );
-    
+
     res.json({
       ...courseResult.rows[0],
       items: itemsResult.rows
