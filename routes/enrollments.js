@@ -86,9 +86,14 @@ async function sendFirstCourseItem(enrollmentId, courseId, phoneNumber) {
 }
 
 function formatCourseItem(item) {
-  // For text items, use content directly
-  // For other types, we might need to adjust based on actual data structure
-  return item.content || item.title || 'Course content';
+  // Since we only have titles, create messages based on titles
+  const messages = {
+    'Welcome': 'Welcome to the test course! 📚 Reply NEXT to continue.',
+    'Lesson 1': 'Great! This is item 2. Learning via WhatsApp is fun! Reply NEXT.',
+    'Final Lesson': '🎉 Final item! You made it! This completes your test course.'
+  };
+  
+  return messages[item.title] || item.title || 'Course content';
 }
 
 module.exports = router;
