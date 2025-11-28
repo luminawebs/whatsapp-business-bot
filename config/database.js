@@ -8,4 +8,29 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
 });
 
-module.exports = pool;
+const db = {
+  query: (text, params) => pool.query(text, params),
+  any: async (text, params) => {
+    const res = await pool.query(text, params);
+    return res.rows;
+  },
+  one: async (text, params) => {
+    const res = await pool.query(text, params);
+    if (res.rows.length !== 1) {
+      throw new Error(`Expected one row, got ${res.rows.length}`);
+    }
+    return res.rows[0];
+  },
+  oneOrNone: async (text, params) => {
+    const res = await pool.query(text, params);
+    if (res.rows.length > 1) {
+      throw new Error(`Expected at most one row, got ${res.rows.length}`);
+    }
+    return res.rows[0] || null;
+  },
+  none: async (text, params) => {
+    await pool.query(text, params);
+  },
+};
+
+module.exports = db;

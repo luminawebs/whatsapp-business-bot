@@ -1,7 +1,8 @@
 const express = require('express');
-const db = require('./config/database'); // Use the centralized database config
+const db = require('./config/database');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { sendWhatsAppMessage } = require('./services/whatsappService');
 const app = express();
 app.use(express.json());
 
@@ -27,42 +28,7 @@ console.log('🌐 Webhook endpoint: /webhook (port ' + (process.env.PORT || 3001
 console.log('💻 RAM: OPTIMIZADA para 512MB');
 console.log('=====================================');
 
-// ===== WHATSAPP MESSAGE SENDER =====
-async function sendWhatsAppMessage(phoneNumber, message) {
-  try {
-    // Remove any formatting and keep only digits
-    const formattedPhone = phoneNumber.replace(/\D/g, '');
-    
-    // For now, just log since we don't have WhatsApp API credentials set up
-    console.log(`📤 [WHATSAPP SIMULATION] To: ${formattedPhone}`);
-    console.log(`📤 Message: ${message}`);
-    console.log('---');
-    
-    // In production, you would uncomment this:
-    /*
-    const response = await axios.post(
-      `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: formattedPhone,
-        type: "text",
-        text: { body: message }
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    */
-    
-    return { success: true, simulated: true };
-  } catch (error) {
-    console.error('WhatsApp API error:', error.response?.data || error.message);
-    throw error;
-  }
-}
+ 
 
 // ===== NEW: NEXT COMMAND HANDLER =====
 async function handleNextCommand(phoneNumber) {
