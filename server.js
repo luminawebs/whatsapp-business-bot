@@ -132,6 +132,55 @@ function formatCourseItem(item) {
   }
 }
 
+
+// ===== AUTO-CREATE DEFAULT TENANT =====
+async function ensureDefaultTenant() {
+  try {
+    let defaultTenant = await db.oneOrNone(
+      'SELECT id FROM tenants WHERE name = $1 LIMIT 1',
+      ['Default System Tenant']
+    );
+
+    if (!defaultTenant) {
+      defaultTenant = await db.one(
+        `INSERT INTO tenants (name, contact_email, created_at) 
+         VALUES ($1, $2, NOW()) RETURNING id`,
+        ['Default System Tenant', 'system@whatsapp-learning.com']
+      );
+      console.log('✅ Created default system tenant:', defaultTenant.id);
+    } else {
+      console.log('✅ Default tenant already exists:', defaultTenant.id);
+    }
+
+    return defaultTenant.id;
+  } catch (error) {
+    console.log('⚠️ Could not ensure default tenant:', error.message);
+    return null;
+  }
+}
+
+// ===== TENANT DETECTION FOR WEBHOOK =====
+async function detectTenantFromPhone(phoneNumber) {
+  try {
+    // Look for participant with this phone number
+    const participant = await db.oneOrNone(
+      'SELECT tenant_id FROM participants WHERE phone_e164 = $1 LIMIT 1',
+      [phoneNumber]
+    );
+
+    if (participant) {
+      return participant.tenant_id;
+    }
+
+    // Fallback to default tenant
+    return await ensureDefaultTenant();
+  } catch (error) {
+    console.log('Tenant detection failed, using default');
+    return await ensureDefaultTenant();
+  }
+}
+
+
 // ===== YOUR EXISTING WEBHOOK (KEEP THIS) =====
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -150,10 +199,10 @@ app.get('/webhook', (req, res) => {
 });
 
 // ===== ENHANCED WEBHOOK (PROCESSES NEXT COMMANDS) =====
+// ===== ENHANCED WEBHOOK (WITH TENANT DETECTION) =====
 app.post('/webhook', async (req, res) => {
   console.log('📨 Mensaje recibido de WhatsApp');
-
-  // NEW: Process messages for "next" command
+  
   if (req.body.entry && req.body.entry[0].changes && req.body.entry[0].changes[0].value.messages) {
     const message = req.body.entry[0].changes[0].value.messages[0];
     const from = message.from;
@@ -161,25 +210,29 @@ app.post('/webhook', async (req, res) => {
 
     console.log(`💬 Message from ${from}: "${text}"`);
 
+    // Detect or use default tenant
+    const tenantId = await detectTenantFromPhone(from);
+
     // Process "next" command
     if (text && text.toLowerCase().trim() === 'next') {
       await handleNextCommand(from);
     }
 
-    // NEW: Store message in database if available
+    // Store message with proper tenant
     try {
-      await db.query(
-        `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
-   VALUES ($1, $2, $3, $4)`,
-        ['d951955c-4994-4d74-96a5-6709aa4f5405', message.id, 'in', req.body]  // ← Use real tenant ID
-      );
-
-      console.log(`💾 Mensaje guardado en base de datos de: ${from}`);
+      if (tenantId) {
+        await db.query(
+          `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
+           VALUES ($1, $2, $3, $4)`,
+          [tenantId, message.id, 'in', req.body]
+        );
+        console.log(`💾 Message saved for tenant: ${tenantId}`);
+      }
     } catch (dbError) {
-      console.log('⚠️  No se pudo guardar en BD:', dbError.message);
+      console.log('⚠️ Could not save message to DB:', dbError.message);
     }
   }
-
+  
   res.sendStatus(200);
 });
 
@@ -425,6 +478,9 @@ if (require.main === module) {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`🚀 WhatsApp Bot ejecutándose en puerto ${PORT}`);
     console.log(`🛡️  Health check: http://localhost:${PORT}/health`);
+    
+    // NEW: Ensure default tenant exists on startup
+    await ensureDefaultTenant();
   });
 }
 
