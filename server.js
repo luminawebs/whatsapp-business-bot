@@ -40,7 +40,7 @@ async function handleNextCommand(phoneNumber) {
       SELECT e.*, p.tenant_id 
       FROM enrollments e
       JOIN participants p ON e.participant_id = p.id
-      WHERE p.phone_number = $1 AND e.status = 'active'
+      WHERE p.phone_e164 = $1 AND e.status = 'active'
       LIMIT 1
     `, [phoneNumber]);
 
