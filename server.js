@@ -70,13 +70,13 @@ async function handleNextCommand(phoneNumber) {
       // Send next item
       await sendWhatsAppMessage(phoneNumber, formatCourseItem(nextItem));
 
-      // Log delivery (mark previous response and new delivery)
+      // Log delivery (mark current item as responded)
       if (nextItemIndex > 0) {
         await db.none(
           `UPDATE delivery_log 
            SET user_responded_at = NOW() 
            WHERE enrollment_id = $1 AND item_index = $2`,
-          [enrollment.id, nextItemIndex - 1]
+          [enrollment.id, nextItemIndex]
         );
       }
 
@@ -104,7 +104,7 @@ async function handleNextCommand(phoneNumber) {
         `UPDATE delivery_log 
          SET user_responded_at = NOW() 
          WHERE enrollment_id = $1 AND item_index = $2`,
-        [enrollment.id, nextItemIndex - 1]
+        [enrollment.id, nextItemIndex]
       );
 
       console.log(`✅ Course completed by ${phoneNumber}`);
