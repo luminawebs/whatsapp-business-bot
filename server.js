@@ -56,7 +56,7 @@ async function handleNextCommand(phoneNumber) {
       WHERE enrollment_id = $1 AND user_responded_at IS NOT NULL
     `, [enrollment.id]);
 
-    const nextItemIndex = (currentProgress?.current_index || -1) + 1;
+    const nextItemIndex = (currentProgress?.current_index || 0) + 1;
 
     // Get next item
     const nextItem = await db.oneOrNone(`
