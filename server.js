@@ -416,7 +416,7 @@ app.post('/api/tenant/:tenantId/courses', async (req, res) => {
 app.post('/api/courses/:courseId/items', async (req, res) => {
   try {
     const { courseId } = req.params;
-    const { type, title, content_url, metadata, required, idx } = req.body;
+    const { type, title, content_url, metadata, required, item_order } = req.body;
 
     // Get tenant_id from course for security
     const courseCheck = await db.query(
@@ -431,9 +431,9 @@ app.post('/api/courses/:courseId/items', async (req, res) => {
     const tenantId = courseCheck.rows[0].tenant_id;
 
     const result = await db.query(
-      `INSERT INTO course_items (course_id, tenant_id, idx, type, title, content_url, metadata, required) 
+      `INSERT INTO course_items (course_id, tenant_id, item_order, type, title, content_url, metadata, required) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [courseId, tenantId, idx, type, title, content_url, metadata, required !== false]
+      [courseId, tenantId, item_order, type, title, content_url, metadata, required !== false]
     );
 
     res.status(201).json(result.rows[0]);
@@ -458,7 +458,7 @@ app.get('/api/courses/:courseId', async (req, res) => {
     }
 
     const itemsResult = await db.query(
-      'SELECT * FROM course_items WHERE course_id = $1 ORDER BY idx',
+      'SELECT * FROM course_items WHERE course_id = $1 ORDER BY item_order',
       [courseId]
     );
 

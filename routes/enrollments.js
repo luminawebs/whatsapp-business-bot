@@ -59,11 +59,11 @@ router.post('/tenants/:tenantId/enroll-user', async (req, res) => {
 });
 
 async function sendFirstCourseItem(enrollmentId, courseId, phoneNumber) {
-  // Get first course item (using idx column for ordering)
+  // Get first course item (using item_order column for ordering)
   const firstItem = await db.oneOrNone(
     `SELECT * FROM course_items 
      WHERE course_id = $1 
-     ORDER BY idx ASC 
+     ORDER BY item_order ASC 
      LIMIT 1`,
     [courseId]
   );
