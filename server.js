@@ -120,15 +120,15 @@ async function handleNextCommand(phoneNumber) {
 function formatCourseItem(item) {
   switch (item.type) {
     case 'text':
-      return item.content;
+      return item.content_url;
     case 'image':
-      return `${item.content}\n\n[Image]`;
+      return `${item.content_url}\n\n[Image]`;
     case 'audio':
-      return `${item.content}\n\n[Audio]`;
+      return `${item.content_url}\n\n[Audio]`;
     case 'video':
-      return `${item.content}\n\n[Video]`;
+      return `${item.content_url}\n\n[Video]`;
     default:
-      return item.content;
+      return item.content_url;
   }
 }
 
