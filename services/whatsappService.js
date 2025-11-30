@@ -14,6 +14,8 @@
 // module.exports = { sendWhatsAppMessage };
 
 
+const axios = require('axios');
+
 async function sendWhatsAppMessage(phoneNumber, message) {
   try {
     // Remove any formatting and keep only digits
@@ -22,7 +24,14 @@ async function sendWhatsAppMessage(phoneNumber, message) {
     console.log(`📤 [REAL WHATSAPP] Attempting to send to: ${formattedPhone}`);
     console.log(`📤 Message: ${message}`);
     
-    // REAL WhatsApp API call (uncommented)
+    // Check if we have the required environment variables
+    if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID) {
+      console.log('⚠️  WhatsApp credentials missing, using simulation');
+      console.log('---');
+      return { success: true, simulated: true };
+    }
+    
+    // REAL WhatsApp API call
     const response = await axios.post(
       `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
       {
@@ -44,6 +53,12 @@ async function sendWhatsAppMessage(phoneNumber, message) {
     
   } catch (error) {
     console.error('❌ WhatsApp API error:', error.response?.data || error.message);
-    throw error;
+    
+    // Fallback to simulation if API fails
+    console.log('🔄 Falling back to simulation');
+    console.log('---');
+    return { success: false, error: error.message, simulated: true };
   }
 }
+
+module.exports = { sendWhatsAppMessage };
