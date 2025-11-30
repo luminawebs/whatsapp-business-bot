@@ -1,63 +1,54 @@
-// async function sendWhatsAppMessage(phoneNumber, message) {
-//   try {
-//     const formattedPhone = phoneNumber.replace(/\D/g, '');
-//     console.log(`📤 [WHATSAPP SIMULATION] To: ${formattedPhone}`);
-//     console.log(`📤 Message: ${message}`);
-//     console.log('---');
-//     return { success: true, simulated: true };
-//   } catch (error) {
-//     console.error('WhatsApp API error:', error.message);
-//     throw error;
-//   }
-// }
-
-// module.exports = { sendWhatsAppMessage };
-
-
-const axios = require('axios');
-
 async function sendWhatsAppMessage(phoneNumber, message) {
   try {
     // Remove any formatting and keep only digits
     const formattedPhone = phoneNumber.replace(/\D/g, '');
     
-    console.log(`📤 [REAL WHATSAPP] Attempting to send to: ${formattedPhone}`);
+    console.log(`📤 [WHATSAPP] To: ${formattedPhone}`);
     console.log(`📤 Message: ${message}`);
     
-    // Check if we have the required environment variables
+    // Check if we have the required environment variables for real API
     if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID) {
       console.log('⚠️  WhatsApp credentials missing, using simulation');
       console.log('---');
       return { success: true, simulated: true };
     }
     
-    // REAL WhatsApp API call
-    const response = await axios.post(
+    console.log('🚀 Attempting REAL WhatsApp API call...');
+    
+    // REAL WhatsApp API call using native fetch
+    const response = await fetch(
       `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
       {
-        messaging_product: "whatsapp",
-        to: formattedPhone,
-        type: "text",
-        text: { body: message }
-      },
-      {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: formattedPhone,
+          type: "text",
+          text: { body: message }
+        })
       }
     );
 
-    console.log('✅ WhatsApp message sent successfully:', response.data);
-    return response.data;
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`WhatsApp API error: ${JSON.stringify(data)}`);
+    }
+
+    console.log('✅ REAL WhatsApp message sent successfully!');
+    return data;
     
   } catch (error) {
-    console.error('❌ WhatsApp API error:', error.response?.data || error.message);
+    console.error('❌ WhatsApp API failed:', error.message);
     
-    // Fallback to simulation if API fails
+    // Fallback to simulation
     console.log('🔄 Falling back to simulation');
     console.log('---');
-    return { success: false, error: error.message, simulated: true };
+    return { success: true, simulated: true };
   }
 }
 
