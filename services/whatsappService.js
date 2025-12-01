@@ -1,55 +1,87 @@
+const https = require('https');
+
 async function sendWhatsAppMessage(phoneNumber, message) {
-  try {
-    // Remove any formatting and keep only digits
-    const formattedPhone = phoneNumber.replace(/\D/g, '');
-    
-    console.log(`📤 [WHATSAPP] To: ${formattedPhone}`);
-    console.log(`📤 Message: ${message}`);
-    
-    // Check if we have the required environment variables for real API
-    if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID) {
-      console.log('⚠️  WhatsApp credentials missing, using simulation');
-      console.log('---');
-      return { success: true, simulated: true };
-    }
-    
-    console.log('🚀 Attempting REAL WhatsApp API call...');
-    
-    // REAL WhatsApp API call using native fetch
-    const response = await fetch(
-      `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-      {
+  return new Promise((resolve, reject) => {
+    try {
+      // Remove any formatting and keep only digits
+      const formattedPhone = phoneNumber.replace(/\D/g, '');
+      
+      console.log(`📤 [REAL WHATSAPP] Attempting to send to: ${formattedPhone}`);
+      console.log(`📤 Message: ${message}`);
+      
+      // Check if we have the required environment variables for real API
+      if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID) {
+        console.log('⚠️  WhatsApp credentials missing, using simulation');
+        console.log('---');
+        return resolve({ success: true, simulated: true });
+      }
+      
+      console.log('🚀 Attempting REAL WhatsApp API call...');
+      
+      const postData = JSON.stringify({
+        messaging_product: "whatsapp",
+        to: formattedPhone,
+        type: "text",
+        text: { body: message }
+      });
+
+      const options = {
+        hostname: 'graph.facebook.com',
+        port: 443,
+        path: `/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: formattedPhone,
-          type: "text",
-          text: { body: message }
-        })
-      }
-    );
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
 
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(`WhatsApp API error: ${JSON.stringify(data)}`);
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const parsedData = JSON.parse(data);
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              console.log('✅ REAL WhatsApp message sent successfully!');
+              resolve(parsedData);
+            } else {
+              console.error('❌ WhatsApp API error:', parsedData);
+              console.log('🔄 Falling back to simulation');
+              console.log('---');
+              resolve({ success: true, simulated: true });
+            }
+          } catch (error) {
+            console.error('❌ Error parsing WhatsApp response:', error.message);
+            console.log('🔄 Falling back to simulation');
+            console.log('---');
+            resolve({ success: true, simulated: true });
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        console.error('❌ WhatsApp API failed:', error.message);
+        console.log('🔄 Falling back to simulation');
+        console.log('---');
+        resolve({ success: true, simulated: true });
+      });
+
+      req.write(postData);
+      req.end();
+      
+    } catch (error) {
+      console.error('❌ Error in sendWhatsAppMessage:', error.message);
+      console.log('🔄 Falling back to simulation');
+      console.log('---');
+      resolve({ success: true, simulated: true });
     }
-
-    console.log('✅ REAL WhatsApp message sent successfully!');
-    return data;
-    
-  } catch (error) {
-    console.error('❌ WhatsApp API failed:', error.message);
-    
-    // Fallback to simulation
-    console.log('🔄 Falling back to simulation');
-    console.log('---');
-    return { success: true, simulated: true };
-  }
+  });
 }
 
 module.exports = { sendWhatsAppMessage };
