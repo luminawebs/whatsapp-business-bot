@@ -71,13 +71,13 @@ async function handleNextCommand(phoneNumber) {
       // Send next item
       await sendWhatsAppMessage(phoneNumber, formatCourseItem(nextItem));
 
-      // Log delivery (mark current item as responded)
+      // Log delivery: mark previous item as responded
       if (nextItemIndex > 0) {
         await db.none(
           `UPDATE delivery_log 
            SET user_responded_at = NOW() 
            WHERE enrollment_id = $1 AND item_index = $2`,
-          [enrollment.id, nextItemIndex]
+          [enrollment.id, nextItemIndex - 1]
         );
       }
 
