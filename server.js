@@ -1,4 +1,9 @@
+const path = require('path');
+// Try to load .env from current dir, then from root project dir
 require('dotenv').config();
+if (!process.env.WHATSAPP_ACCESS_TOKEN) {
+  require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+}
 const express = require('express');
 const db = require('./config/database');
 const bcrypt = require('bcryptjs');
@@ -6,30 +11,36 @@ const jwt = require('jsonwebtoken');
 const { sendWhatsAppMessage } = require('./services/whatsappService');
 const app = express();
 app.use(express.json());
+// Serve static files from 'public' directory
+app.use(express.static('public'));
 
 // Import the new routes
 const enrollmentRoutes = require('./routes/enrollments');
 const dashboardRoutes = require('./routes/dashboard');
+const courseRoutes = require('./routes/courses');
 
 // Register routes
 app.use('/api', enrollmentRoutes);
 app.use('/api', dashboardRoutes);
+app.use('/api', courseRoutes);
 
 // ===== YOUR EXISTING CONFIG (KEEP THIS) =====
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "whatsapp_bot_token_fijo_123";
 const _isDefaultVerifyToken = VERIFY_TOKEN === "whatsapp_bot_token_fijo_123";
 
-console.log('🔧 ===== WHATSAPP BOT INSTALADO =====');
-if (_isDefaultVerifyToken) {
-  console.log('⚠️  WARNING: Using default built-in verification token. Set VERIFY_TOKEN env var for production.');
-} else {
-  console.log('🔑 Token de verificación: [PROVIDED]');
-}
 console.log('🌐 Webhook endpoint: /webhook (port ' + (process.env.PORT || 3001) + ')');
 console.log('💻 RAM: OPTIMIZADA para 512MB');
 console.log('=====================================');
 
-
+// ===== CREDENTIAL CHECK =====
+if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID) {
+  console.log('\n⚠️  MISSING WHATSAPP CREDENTIALS ⚠️');
+  console.log('   The bot is running in SIMULATION mode.');
+  console.log('   To enable real messaging, set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_ID in your .env file.');
+  console.log('   (See .env.example for details)\n');
+} else {
+  console.log('\n✅ WhatsApp Credentials found. Running in REAL mode.');
+}
 
 // ===== NEW: NEXT COMMAND HANDLER =====
 async function handleNextCommand(phoneNumber) {
@@ -203,7 +214,7 @@ app.get('/webhook', (req, res) => {
 // ===== ENHANCED WEBHOOK (WITH TENANT DETECTION) =====
 app.post('/webhook', async (req, res) => {
   console.log('📨 Mensaje recibido de WhatsApp');
-  
+
   if (req.body.entry && req.body.entry[0].changes && req.body.entry[0].changes[0].value.messages) {
     const message = req.body.entry[0].changes[0].value.messages[0];
     const from = message.from;
@@ -233,7 +244,7 @@ app.post('/webhook', async (req, res) => {
       console.log('⚠️ Could not save message to DB:', dbError.message);
     }
   }
-  
+
   res.sendStatus(200);
 });
 
@@ -377,101 +388,7 @@ app.get('/api/test/courses', async (req, res) => {
   }
 });
 
-// ===== WEEK 2: COURSE MANAGEMENT API =====
-
-// Get all courses for a tenant
-app.get('/api/tenant/:tenantId/courses', async (req, res) => {
-  try {
-    const { tenantId } = req.params;
-    const result = await db.query(
-      'SELECT * FROM courses WHERE tenant_id = $1 ORDER BY created_at DESC',
-      [tenantId]
-    );
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Get courses error:', error);
-    res.status(500).json({ error: 'Failed to fetch courses' });
-  }
-});
-
-// Create a new course
-app.post('/api/tenant/:tenantId/courses', async (req, res) => {
-  try {
-    const { tenantId } = req.params;
-    const { title, description, passing_score } = req.body;
-
-    const result = await db.query(
-      `INSERT INTO courses (tenant_id, title, description, passing_score) 
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [tenantId, title, description, passing_score || 70]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Create course error:', error);
-    res.status(500).json({ error: 'Failed to create course' });
-  }
-});
-
-// Add content item to course
-app.post('/api/courses/:courseId/items', async (req, res) => {
-  try {
-    const { courseId } = req.params;
-    const { type, title, content_url, metadata, required, item_order } = req.body;
-
-    // Get tenant_id from course for security
-    const courseCheck = await db.query(
-      'SELECT tenant_id FROM courses WHERE id = $1',
-      [courseId]
-    );
-
-    if (courseCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Course not found' });
-    }
-
-    const tenantId = courseCheck.rows[0].tenant_id;
-
-    const result = await db.query(
-      `INSERT INTO course_items (course_id, tenant_id, item_order, type, title, content_url, metadata, required) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [courseId, tenantId, item_order, type, title, content_url, metadata, required !== false]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Add course item error:', error);
-    res.status(500).json({ error: 'Failed to add course item' });
-  }
-});
-
-// Get course with items
-app.get('/api/courses/:courseId', async (req, res) => {
-  try {
-    const { courseId } = req.params;
-
-    const courseResult = await db.query(
-      'SELECT * FROM courses WHERE id = $1',
-      [courseId]
-    );
-
-    if (courseResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Course not found' });
-    }
-
-    const itemsResult = await db.query(
-      'SELECT * FROM course_items WHERE course_id = $1 ORDER BY item_order',
-      [courseId]
-    );
-
-    res.json({
-      ...courseResult.rows[0],
-      items: itemsResult.rows
-    });
-  } catch (error) {
-    console.error('Get course error:', error);
-    res.status(500).json({ error: 'Failed to fetch course' });
-  }
-});
+// (Course routes moved to routes/courses.js)
 
 // ===== YOUR EXISTING SERVER STARTUP =====
 const PORT = process.env.PORT || 3001;
@@ -479,7 +396,7 @@ if (require.main === module) {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`🚀 WhatsApp Bot ejecutándose en puerto ${PORT}`);
     console.log(`🛡️  Health check: http://localhost:${PORT}/health`);
-    
+
     // NEW: Ensure default tenant exists on startup
     await ensureDefaultTenant();
   });

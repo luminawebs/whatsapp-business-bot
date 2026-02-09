@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:connection": "node ../../scripts/test-whatsapp-connection.js",
+    "test:course-crud": "node ../../scripts/test-course-crud.js",
+    "db:check": "echo 'Not implemented yet'"
   },
   "keywords": [
     "whatsapp",

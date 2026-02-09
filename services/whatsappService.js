@@ -1,23 +1,30 @@
 const https = require('https');
 
+// Helper to determine if we should simulate
+const shouldSimulate = () => {
+  return !process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID;
+};
+
 async function sendWhatsAppMessage(phoneNumber, message) {
   return new Promise((resolve, reject) => {
     try {
       // Remove any formatting and keep only digits
       const formattedPhone = phoneNumber.replace(/\D/g, '');
-      
-      console.log(`📤 [REAL WHATSAPP] Attempting to send to: ${formattedPhone}`);
-      console.log(`📤 Message: ${message}`);
-      
-      // Check if we have the required environment variables for real API
-      if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_ID) {
-        console.log('⚠️  WhatsApp credentials missing, using simulation');
+
+      console.log(`\n📤 [SENDING] To: ${formattedPhone}`);
+
+      // Simulation Mode
+      if (shouldSimulate()) {
+        console.log('⚠️  [SIMULATION] Verification or Credentials missing.');
+        console.log(`   Message Content: "${message}"`);
+        console.log('   Action: Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_ID in .env to send real messages.');
         console.log('---');
         return resolve({ success: true, simulated: true });
       }
-      
-      console.log('🚀 Attempting REAL WhatsApp API call...');
-      
+
+      // Real Send Mode
+      console.log('🚀 [REAL API] Attempting to send via WhatsApp Cloud API...');
+
       const postData = JSON.stringify({
         messaging_product: "whatsapp",
         to: formattedPhone,
@@ -47,39 +54,36 @@ async function sendWhatsAppMessage(phoneNumber, message) {
         res.on('end', () => {
           try {
             const parsedData = JSON.parse(data);
+
             if (res.statusCode >= 200 && res.statusCode < 300) {
-              console.log('✅ REAL WhatsApp message sent successfully!');
+              console.log('✅ [SUCCESS] Message sent!');
+              console.log(`   ID: ${parsedData.messages?.[0]?.id || 'unknown'}`);
               resolve(parsedData);
             } else {
-              console.error('❌ WhatsApp API error:', parsedData);
-              console.log('🔄 Falling back to simulation');
-              console.log('---');
-              resolve({ success: true, simulated: true });
+              console.error('❌ [API ERROR] WhatsApp rejected the request:');
+              console.error(JSON.stringify(parsedData, null, 2));
+
+              // Don't fallback to simulation on API error - we want to know it failed
+              resolve({ success: false, error: parsedData });
             }
           } catch (error) {
-            console.error('❌ Error parsing WhatsApp response:', error.message);
-            console.log('🔄 Falling back to simulation');
-            console.log('---');
-            resolve({ success: true, simulated: true });
+            console.error('❌ [PARSE ERROR] Invalid JSON response from Meta:', data);
+            resolve({ success: false, error: error.message });
           }
         });
       });
 
       req.on('error', (error) => {
-        console.error('❌ WhatsApp API failed:', error.message);
-        console.log('🔄 Falling back to simulation');
-        console.log('---');
-        resolve({ success: true, simulated: true });
+        console.error('❌ [NETWORK ERROR] Request failed:', error.message);
+        resolve({ success: false, error: error.message });
       });
 
       req.write(postData);
       req.end();
-      
+
     } catch (error) {
-      console.error('❌ Error in sendWhatsAppMessage:', error.message);
-      console.log('🔄 Falling back to simulation');
-      console.log('---');
-      resolve({ success: true, simulated: true });
+      console.error('❌ [INTERNAL ERROR] sendWhatsAppMessage failed:', error.message);
+      resolve({ success: false, error: error.message });
     }
   });
 }
