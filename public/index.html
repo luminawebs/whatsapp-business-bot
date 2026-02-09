@@ -85,7 +85,7 @@
             <section class="recent-activity">
                 <div class="section-header">
                     <h2>Recent Student Activity</h2>
-                    <button class="btn-primary"><i class="fa-solid fa-plus"></i> Enroll New User</button>
+                    <button class="btn-primary" id="btnEnrollUser"><i class="fa-solid fa-plus"></i> Enroll New User</button>
                 </div>
                 <div class="card table-card">
                     <table id="usersTable">
@@ -139,6 +139,59 @@
                 </div>
             </section>
         </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="modalCreateCourse" class="modal-overlay hidden">
+        <div class="modal-card">
+            <h3>Create Course</h3>
+            <form id="formCreateCourse">
+                <label>Title <input type="text" id="newCourseTitle" required placeholder="e.g. Onboarding 101"></label>
+                <label>Description <textarea id="newCourseDesc" rows="2" placeholder="Short description"></textarea></label>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" onclick="closeModal('modalCreateCourse')">Cancel</button>
+                    <button type="submit" class="btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div id="modalAddItem" class="modal-overlay hidden">
+        <div class="modal-card">
+            <h3>Add Course Item</h3>
+            <form id="formAddItem">
+                <label>Type
+                    <select id="newItemType">
+                        <option value="text">Text</option>
+                        <option value="image">Image</option>
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                    </select>
+                </label>
+                <label>Title <input type="text" id="newItemTitle" required placeholder="e.g. Welcome message"></label>
+                <label>Content / URL <input type="text" id="newItemContent" placeholder="Text or URL"></label>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" onclick="closeModal('modalAddItem')">Cancel</button>
+                    <button type="submit" class="btn-primary">Add Item</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div id="modalEnrollUser" class="modal-overlay hidden">
+        <div class="modal-card">
+            <h3>Enroll User</h3>
+            <form id="formEnrollUser">
+                <label>Phone (E.164) <input type="text" id="enrollPhone" required placeholder="573001234567"></label>
+                <label>Name <input type="text" id="enrollName" placeholder="Optional"></label>
+                <label>Course
+                    <select id="enrollCourseId"></select>
+                </label>
+                <label class="checkbox-label"><input type="checkbox" id="enrollWithStartButton" checked> Send first message with &quot;Start&quot; button</label>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" onclick="closeModal('modalEnrollUser')">Cancel</button>
+                    <button type="submit" class="btn-primary">Enroll &amp; Send</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- Scripts -->

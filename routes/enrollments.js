@@ -3,10 +3,11 @@ const router = express.Router();
 const db = require('../config/database');
 
 // Try to load whatsappService, but provide fallback if missing
-let sendWhatsAppMessage;
+let sendWhatsAppMessage, sendWhatsAppButtonMessage;
 try {
   const whatsappService = require('../services/whatsappService');
   sendWhatsAppMessage = whatsappService.sendWhatsAppMessage;
+  sendWhatsAppButtonMessage = whatsappService.sendWhatsAppButtonMessage;
 } catch (error) {
   console.log('⚠️  whatsappService not available, using fallback');
   sendWhatsAppMessage = async (phoneNumber, message) => {
@@ -14,13 +15,14 @@ try {
     console.log(`📤 Message: ${message}`);
     return { success: true, simulated: true };
   };
+  sendWhatsAppButtonMessage = async () => ({ success: true, simulated: true });
 }
 
 // Manual enrollment endpoint
 router.post('/tenants/:tenantId/enroll-user', async (req, res) => {
   try {
     const { tenantId } = req.params;
-    const { phoneNumber, courseId, userName } = req.body;
+    const { phoneNumber, courseId, userName, sendWithStartButton } = req.body;
 
     // 1. Find or create participant (using phone_e164 column)
     let participant = await db.oneOrNone(
@@ -38,18 +40,20 @@ router.post('/tenants/:tenantId/enroll-user', async (req, res) => {
 
     // 2. Create enrollment (using your existing schema)
     const enrollment = await db.one(
-      `INSERT INTO enrollments (participant_id, course_id, tenant_id, status, created_at) 
+      `INSERT INTO enrollments (participant_id, course_id, tenant_id, status, enrolled_at) 
        VALUES ($1, $2, $3, 'active', NOW()) RETURNING id`,
       [participant.id, courseId, tenantId]
     );
 
-    // 3. Send first course item
-    await sendFirstCourseItem(enrollment.id, courseId, phoneNumber);
+    // 3. Send first course item (optionally with Start button)
+    const sendResult = await sendFirstCourseItem(enrollment.id, courseId, phoneNumber, !!sendWithStartButton);
 
     res.json({
       success: true,
       message: 'User enrolled successfully',
-      enrollmentId: enrollment.id
+      enrollmentId: enrollment.id,
+      whatsappSent: sendResult.sent,
+      whatsappError: sendResult.error || null
     });
 
   } catch (error) {
@@ -58,8 +62,7 @@ router.post('/tenants/:tenantId/enroll-user', async (req, res) => {
   }
 });
 
-async function sendFirstCourseItem(enrollmentId, courseId, phoneNumber) {
-  // Get first course item (using item_order column for ordering)
+async function sendFirstCourseItem(enrollmentId, courseId, phoneNumber, withStartButton = false) {
   const firstItem = await db.oneOrNone(
     `SELECT * FROM course_items 
      WHERE course_id = $1 
@@ -69,20 +72,38 @@ async function sendFirstCourseItem(enrollmentId, courseId, phoneNumber) {
   );
 
   if (!firstItem) {
-    throw new Error('No items found in course');
+    console.error('[ENROLL] No course items found for courseId=', courseId);
+    throw new Error('No items found in course. Add at least one item in the course editor.');
   }
 
-  // Send via WhatsApp
-  await sendWhatsAppMessage(phoneNumber, formatCourseItem(firstItem));
+  const bodyText = formatCourseItem(firstItem);
+  console.log('[ENROLL] Sending first item to', phoneNumber, '| title=', firstItem.title, '| withStartButton=', withStartButton);
 
-  // Log delivery
+  let result;
+  if (withStartButton && sendWhatsAppButtonMessage) {
+    result = await sendWhatsAppButtonMessage(phoneNumber, bodyText, [{ id: 'accept', title: 'Start' }], { footer: 'Or reply START to begin' });
+  } else {
+    result = await sendWhatsAppMessage(phoneNumber, bodyText);
+  }
+
+  if (result && result.simulated) {
+    console.warn('[ENROLL] SIMULATION MODE – no real message sent. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_ID in .env');
+  } else if (result && (result.error || !result.messages)) {
+    const errMsg = result.error?.error?.message || result.error?.message || JSON.stringify(result.error);
+    console.error('[ENROLL] WhatsApp API FAILED:', errMsg);
+    if (result.error?.error?.code) console.error('[ENROLL] Error code:', result.error.error.code);
+    throw new Error('WhatsApp send failed: ' + errMsg);
+  } else if (result && result.messages) {
+    console.log('[ENROLL] WhatsApp API OK. Message id:', result.messages[0]?.id || 'n/a');
+  }
+
   await db.none(
     `INSERT INTO delivery_log (enrollment_id, item_index, delivered_at) 
      VALUES ($1, $2, NOW())`,
     [enrollmentId, 0]
   );
 
-  console.log(`First item sent to ${phoneNumber}`);
+  return { sent: !!(result && (result.simulated || result.messages)), error: result?.error || null };
 }
 
 function formatCourseItem(item) {

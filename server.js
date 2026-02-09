@@ -8,7 +8,7 @@ const express = require('express');
 const db = require('./config/database');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { sendWhatsAppMessage } = require('./services/whatsappService');
+const { sendWhatsAppMessage, sendWhatsAppButtonMessage } = require('./services/whatsappService');
 const app = express();
 app.use(express.json());
 // Serve static files from 'public' directory
@@ -79,8 +79,13 @@ async function handleNextCommand(phoneNumber) {
     `, [enrollment.course_id, nextItemIndex]);
 
     if (nextItem) {
-      // Send next item
-      await sendWhatsAppMessage(phoneNumber, formatCourseItem(nextItem));
+      const bodyText = formatCourseItem(nextItem);
+      const useAcceptButton = process.env.SEND_ACCEPT_BUTTON === 'true' || process.env.SEND_ACCEPT_BUTTON === '1';
+      if (useAcceptButton) {
+        await sendWhatsAppButtonMessage(phoneNumber, bodyText, [{ id: 'next', title: 'Next' }], { footer: 'Or reply NEXT to continue' });
+      } else {
+        await sendWhatsAppMessage(phoneNumber, bodyText);
+      }
 
       // Log delivery: mark previous item as responded
       if (nextItemIndex > 0) {
@@ -111,12 +116,12 @@ async function handleNextCommand(phoneNumber) {
         [enrollment.id]
       );
 
-      // Mark final response
+      // Mark last item as responded
       await db.none(
         `UPDATE delivery_log 
          SET user_responded_at = NOW() 
          WHERE enrollment_id = $1 AND item_index = $2`,
-        [enrollment.id, nextItemIndex]
+        [enrollment.id, nextItemIndex - 1]
       );
 
       console.log(`✅ Course completed by ${phoneNumber}`);
@@ -210,39 +215,78 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// ===== ENHANCED WEBHOOK (PROCESSES NEXT COMMANDS) =====
-// ===== ENHANCED WEBHOOK (WITH TENANT DETECTION) =====
+// ----- Accept / Next: support both keyword and button (common in course bots) -----
+const NEXT_KEYWORD = 'next';
+const ACCEPT_KEYWORDS = ['accept', 'yes', 'sí', 'si', 'start', 'ok', 'oke', '1', 'continue', 'siguiente'];
+const ACCEPT_BUTTON_IDS = ['accept', 'yes', 'next', 'continue', 'si', 'siguiente'];
+
+function normalizeInput(textOrId) {
+  return (textOrId || '').toLowerCase().trim();
+}
+function isNextCommand(text, buttonId) {
+  if (normalizeInput(text) === NEXT_KEYWORD) return true;
+  if (buttonId && ACCEPT_BUTTON_IDS.includes(normalizeInput(buttonId))) return true;
+  return false;
+}
+function isAcceptCommand(text, buttonId) {
+  if (isNextCommand(text, buttonId)) return true;
+  if (text && ACCEPT_KEYWORDS.includes(normalizeInput(text))) return true;
+  if (buttonId && ACCEPT_BUTTON_IDS.includes(normalizeInput(buttonId))) return true;
+  return false;
+}
+
+// ===== ENHANCED WEBHOOK (PROCESSES MESSAGES + MESSAGE STATUS) =====
 app.post('/webhook', async (req, res) => {
+  const value = req.body.entry?.[0]?.changes?.[0]?.value;
+  const field = req.body.entry?.[0]?.changes?.[0]?.field;
+
+  // Message status updates (delivered, read, failed) – log to see why a message might not arrive
+  if (field === 'message_status' && value?.statuses) {
+    value.statuses.forEach((s) => {
+      console.log(`📬 [STATUS] message_id=${s.id} to ${s.recipient_id} status=${s.status}${s.errors ? ' errors=' + JSON.stringify(s.errors) : ''}`);
+    });
+    return res.sendStatus(200);
+  }
+
+  if (!value?.messages) {
+    return res.sendStatus(200);
+  }
+
   console.log('📨 Mensaje recibido de WhatsApp');
+  const message = value.messages[0];
+  const from = message.from;
+  let text = message.text?.body || '';
+  let buttonId = null;
+  let buttonTitle = null;
 
-  if (req.body.entry && req.body.entry[0].changes && req.body.entry[0].changes[0].value.messages) {
-    const message = req.body.entry[0].changes[0].value.messages[0];
-    const from = message.from;
-    const text = message.text?.body || '';
-
+  if (message.type === 'interactive' && message.interactive?.type === 'button_reply') {
+    const br = message.interactive.button_reply;
+    buttonId = br?.id || '';
+    buttonTitle = br?.title || '';
+    if (!text) text = buttonId || buttonTitle;
+    console.log(`🔘 Button from ${from}: id="${buttonId}" title="${buttonTitle}"`);
+  } else {
     console.log(`💬 Message from ${from}: "${text}"`);
+  }
 
-    // Detect or use default tenant
-    const tenantId = await detectTenantFromPhone(from);
+  const tenantId = await detectTenantFromPhone(from);
 
-    // Process "next" command
-    if (text && text.toLowerCase().trim() === 'next') {
-      await handleNextCommand(from);
+  // Process "next" or "accept" (keyword or button)
+  if (isAcceptCommand(text, buttonId)) {
+    await handleNextCommand(from);
+  }
+
+  try {
+    if (tenantId) {
+      await db.query(
+        `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
+         VALUES ($1, $2, $3, $4)`,
+        [tenantId, message.id, 'in', req.body]
+      );
+      console.log(`💾 Message saved for tenant: ${tenantId}`);
     }
-
-    // Store message with proper tenant
-    try {
-      if (tenantId) {
-        await db.query(
-          `INSERT INTO messages_log (tenant_id, phone_message_id, direction, payload) 
-           VALUES ($1, $2, $3, $4)`,
-          [tenantId, message.id, 'in', req.body]
-        );
-        console.log(`💾 Message saved for tenant: ${tenantId}`);
-      }
-    } catch (dbError) {
-      console.log('⚠️ Could not save message to DB:', dbError.message);
-    }
+  } catch (dbError) {
+    console.log('⚠️ Could not save message to DB:', dbError.message);
   }
 
   res.sendStatus(200);

@@ -22,3 +22,8 @@ Bot de WhatsApp para envío automatizado de cursos y seguimiento de usuarios.
 ## Variables de Entorno
 - VERIFY_TOKEN: Token para verificación webhook
 - PORT: Puerto del servidor (default: 3001)
+- WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_ID: Credenciales Meta (ver META_SETUP_GUIDE.md)
+- SEND_ACCEPT_BUTTON: `true` para enviar curso con botón "Next" (opcional)
+
+## Webhook y aceptar / siguiente
+- Ver [WEBHOOK_AND_ACCEPT.md](../../docs/WEBHOOK_AND_ACCEPT.md) en `docs/`: configuración del webhook y opciones de aceptar (palabra clave vs botón).
